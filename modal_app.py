@@ -3,15 +3,12 @@ import moviepy.editor as mp
 from pathlib import Path
 import whisper
 from loguru import logger
-import shutil
 import os
 import asyncio
 from datetime import datetime
-import time
-import os
 import io
-from pathlib import Path
 import tempfile
+import torch
 
 # Setup logger
 logger.add("debug.log", rotation="10 MB")
@@ -33,25 +30,13 @@ app_image = (
         "moviepy"
     )
     .apt_install("ffmpeg")
-    .pip_install("ffmpeg-python")
 )
 
 # Initialize the Modal app with the custom image
 app = App("video-audio-transcription-app", image=app_image)
 
 # Define the volume for audio and video storage
-storage_volume = Volume.from_name("storage", create_if_missing=True)
-
-@app.function(volumes={"/media": storage_volume})
-def upload_audio_to_volume(volume, local_audio_path, volume_audio_path):
-    logger.info(f"File ready at {volume_audio_path}, ensuring it's committed.")
-    try:
-        volume.commit()  # Commit changes to ensure they are visible remotely
-        logger.info(f"Changes committed successfully.")
-        return "Commit successful"  # Return a success message
-    except Exception as e:
-        logger.error(f"Failed to commit changes: {str(e)}")
-        return f"Commit failed: {str(e)}"  # Return an error message
+volume = Volume.from_name("audio-storage", create_if_missing=True)
 
 def extract_audio_locally(video_file_path):
     logger.info(f"Extracting audio from video: {video_file_path}")
@@ -59,7 +44,7 @@ def extract_audio_locally(video_file_path):
         video = mp.VideoFileClip(video_file_path)
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         audio_file_name = f"{timestamp}_{Path(video_file_path).stem}.mp3"
-        audio_file_path = Path(video_file_path).parent / audio_file_name
+        audio_file_path = Path(tempfile.gettempdir()) / audio_file_name
         video.audio.write_audiofile(str(audio_file_path))
         logger.info(f"Audio extracted and saved to: {audio_file_path}")
         return str(audio_file_path)
@@ -67,25 +52,64 @@ def extract_audio_locally(video_file_path):
         logger.error(f"Failed to extract audio: {str(e)}")
         raise
 
-@app.function(volumes={"/media": storage_volume})
-async def transcribe_audio(audio_data: bytes):
-    logger.info("Loading audio data from memory")
+def save_transcription(output_directory, filename, plain_text, srt_subtitles):
+    logger.info(f"Saving transcription for {filename}")
     try:
-        # Create a temporary file with the audio data
+        with volume.batch_upload() as batch:
+            batch.put_file(io.BytesIO(plain_text.encode("utf-8")), f"{output_directory}/{filename}.txt")
+            batch.put_file(io.BytesIO(srt_subtitles.encode("utf-8")), f"{output_directory}/{filename}.srt")
+        logger.info("Transcription files saved successfully")
+    except Exception as e:
+        logger.error(f"Error saving transcription files: {str(e)}")
+        raise
+
+@app.function(gpu="any", volumes={"/media": volume}, _allow_background_volume_commits=True)
+async def transcribe_audio(remote_audio_path):
+    # Use CUDA, if available
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    logger.info(f"Using device: {DEVICE}")
+
+    logger.info(f"Transcribing audio from path: {remote_audio_path}")
+    logger.info("Reloading volume to get the latest committed state")
+    try:
+        volume.reload()
+        logger.info("Volume reloaded successfully")
+        files = list(volume.iterdir("/media"))
+        logger.info(f"All files in volume: {[file.path for file in files]}")
+        for file_entry in files:
+            logger.info(f"File entry after reload: {file_entry.path}")
+    except Exception as e:
+        logger.error(f"Error reloading volume or listing files: {str(e)}")
+        raise
+
+    # Remove leading slash if present
+    remote_audio_path = remote_audio_path.lstrip('/')
+    logger.info(f"Formatted path for reading: {remote_audio_path}")
+
+    try:
+        audio_data = b""
+        logger.info(f"Attempting to read file at path: {remote_audio_path}")
+        for chunk in volume.read_file(remote_audio_path):
+            audio_data += chunk
+        logger.info("Audio file read successfully")
+    except Exception as e:
+        logger.error(f"Error reading audio file: {str(e)}")
+        raise
+
+    logger.info("Saving audio data to a temporary file")
+    try:
+        # Save the audio data to a temporary file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio_file:
             temp_audio_file.write(audio_data)
             temp_audio_path = temp_audio_file.name
-
-        # Load the audio using AudioFileClip
-        audio = mp.AudioFileClip(temp_audio_path)
-        logger.info("Audio data loaded successfully")
+        logger.info("Audio data saved to a temporary file")
     except Exception as e:
-        logger.error(f"Error loading audio data: {str(e)}")
+        logger.error(f"Error saving audio data to a temporary file: {str(e)}")
         raise
 
     logger.info("Loading Whisper model")
     try:
-        model = whisper.load_model("base")
+        model = whisper.load_model("large").to(DEVICE)
         logger.info("Whisper model loaded successfully")
     except Exception as e:
         logger.error(f"Error loading Whisper model: {str(e)}")
@@ -93,9 +117,16 @@ async def transcribe_audio(audio_data: bytes):
 
     logger.info("Transcribing audio")
     try:
-        result = model.transcribe(temp_audio_path)
+        result = model.transcribe(temp_audio_path, verbose=False, language="en")
         logger.info("Transcription completed")
-        return result["text"]
+
+        plain_text = result["text"]
+        srt_writer = whisper.utils.WriteSRT("") # Create an instance of the WriteSRT class
+        srt_buffer = io.StringIO() # Create a StringIO buffer to write the SRT subtitles
+        srt_writer.write_result(result, srt_buffer) # Write the SRT subtitles to the buffer
+        srt_subtitles = srt_buffer.getvalue() # Get the SRT subtitles as a string
+
+        return plain_text, srt_subtitles
     except Exception as e:
         logger.error(f"Transcription failed: {str(e)}")
         raise
@@ -107,17 +138,43 @@ async def transcribe_audio(audio_data: bytes):
 @app.local_entrypoint()
 async def main():
     local_video_path = "/Users/erniesg/Movies/video.mov"
-    logger.info(f"Starting processing for: {local_video_path}")
+    local_audio_path = extract_audio_locally(local_video_path)
+
+    # Get the filename from the local audio path
+    audio_filename = Path(local_audio_path).name
+
+    # Upload the audio file to the volume using the same filename
+    remote_audio_path = f"/media/{audio_filename}"
+    logger.info(f"Remote audio path: {remote_audio_path}")
+
     try:
-        local_audio_path = extract_audio_locally(local_video_path)
-        logger.info(f"Local audio path: {local_audio_path}.")
+        with volume.batch_upload() as batch:
+            batch.put_file(local_audio_path, remote_audio_path)
+        logger.info(f"File uploaded successfully.")
 
-        with open(local_audio_path, "rb") as f:
-            audio_data = f.read()
-
-        logger.info(f"Invoking transcription on audio data.")
-        transcription = transcribe_audio.remote(audio_data)
-        logger.info(f"Transcription result: {transcription}")
-        print(transcription)
+        for file_entry in volume.iterdir(str(remote_audio_path)):
+            logger.info(f"File in remote: {file_entry.path}")
     except Exception as e:
-        logger.error(f"Error in processing workflow: {str(e)}")
+        logger.error(f"Failed to upload file: {str(e)}")
+        raise
+
+    # Remove the local audio file after uploading
+    try:
+        os.remove(local_audio_path)
+        logger.info(f"Local audio file {local_audio_path} removed")
+    except Exception as e:
+        logger.error(f"Failed to remove local audio file: {str(e)}")
+
+    # Transcribe the audio from the volume
+    plain_text, srt_subtitles = transcribe_audio.remote(remote_audio_path)
+
+    # Print the first 150 words of the plain text
+    print("First 150 words of plain text:")
+    print(" ".join(plain_text.split()[:150]) + " ...")
+
+    print("\nFirst 8 lines of SRT subtitles:")
+    print("\n".join(srt_subtitles.split("\n")[:8]))
+
+    # Save the transcription files to the remote volume
+    output_directory = "/media/transcriptions"
+    save_transcription(output_directory, Path(audio_filename).stem, plain_text, srt_subtitles)
