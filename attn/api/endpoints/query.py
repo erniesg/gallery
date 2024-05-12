@@ -54,14 +54,16 @@ async def query(request: QueryRequest):
         query_text = request.query
         user_profile = request.user_profile or UserProfile()
         urls_response = generate_urls.remote(request)
-        return {
-            "response": f"Query received: {query_text}",
-            "user_profile": user_profile.dict(),
-            "urls": urls_response['urls']
-        }
+
+        async def stream_urls():
+            yield f"Query received: {query_text}\n"
+            yield f"User profile: {json.dumps(user_profile.dict())}\n"
+            for url in urls_response['urls']:
+                yield f"{url}\n"
+
+        return StreamingResponse(stream_urls(), media_type="text/plain")
     except Exception as e:
-        # Log the exception or handle it appropriately
-        print(f"Error occurred: {str(e)}")
+        logger.error(f"Error occurred: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 @app.function()
@@ -123,6 +125,7 @@ async def call_llm_api(prompt: str, model: str):
         # Use the streaming API
         with client.messages.stream(
             model=model,
+            max_tokens=100,
             messages=[{"role": "user", "content": prompt}]
         ) as stream:
             content = []
