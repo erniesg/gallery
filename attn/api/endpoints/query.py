@@ -100,7 +100,7 @@ Please provide a response in the following structured JSON format:
 
 The "urls" array should contain objects with a single "url" property, representing the master domain URL only. Do not include any other properties like title or source.
 
-Return a list of {request.num_urls} URLs relevant to the query '{request.query}' for a user with the following profile:
+Return a list of {request.num_urls} news and publications URLs relevant to the query '{request.query}' for a user with the following profile:
 - Preferred Name: {request.user_profile.preferred_name if request.user_profile else 'Default Name'}
 - Country of Residence: {request.user_profile.country_of_residence if request.user_profile else 'Default Country'}
 - Age: {request.user_profile.age if request.user_profile else 30}
