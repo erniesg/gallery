@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 import logging
 import json
 import backoff
+import re
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -69,27 +70,45 @@ async def read(request: ReadRequest):
 
 async def fetch_and_parse_url(url: str) -> ArticleData:
     logging.info(f"Initiating parsing for URL: {url}")
-    raw_content = await fetch_content(url)
-    logging.info(f"Received raw content: {raw_content}")
-
     try:
-        # Assuming the content is a JSON string embedded within the stream
-        content_data = json.loads(raw_content.split("data: ")[1])
-        content = content_data['content']
-    except (IndexError, json.JSONDecodeError) as e:
-        logging.error(f"Error parsing JSON content for URL {url}: {str(e)}")
-        content = "Content could not be parsed"
+        raw_content = await fetch_content(url)
+        logging.info(f"Received raw content: {raw_content} of {type(raw_content)}")
 
-    metadata = await fetch_metadata(url)
+        # Split the content into lines and filter for lines starting with 'data:'
+        json_str = next(line for line in raw_content.split('\n') if line.startswith('data:')).strip()[5:]
+        # Join the filtered lines and parse as JSON
+        content_data = json.loads(json_str)
+        content = content_data['content']
+
+        metadata = await fetch_metadata(url)
+        title = metadata['title']
+        keywords = metadata['keywords']
+        description = metadata['description']
+
+        # Check if both title and content are not empty
+        if title != 'No title found' and content.strip():
+            status = 'read'
+        else:
+            status = 'error'
+            logging.error(f"Insufficient data for URL {url}: Title or content missing.")
+
+    except Exception as e:
+        logging.error(f"Error processing URL {url}: {str(e)}")
+        title = 'No title found'
+        description = 'No description found'
+        keywords = []
+        content = "Content could not be parsed"
+        status = 'error'
+
     return ArticleData(
         url=url,
         accessed_date=datetime.now(),
-        title=metadata['title'],
-        keywords=metadata['keywords'],
-        description=metadata['description'],
+        title=title,
+        keywords=keywords,
+        description=description,
         content=content,
         article_urls=[],  # Placeholder for future enhancement
-        status='read' if content else 'error'
+        status=status
     )
 
 async def fetch_metadata(url: str) -> dict:
@@ -135,7 +154,7 @@ async def fetch_metadata(url: str) -> dict:
 async def fetch_content(url: str) -> str:
     logging.info(f"Initiating content fetch for URL: {url}")
     full_url = f"https://r.jina.ai/{url}"  # Construct the full URL
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=180.0) as client:
         try:
             logging.info(f"Sending HTTP GET request to stream: {full_url}")
             async with client.stream("GET", full_url, headers={"Accept": "text/event-stream"}) as response:
