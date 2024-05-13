@@ -21,7 +21,7 @@ app_image = (
     )
 )
 
-app = App(name="query-app", image=app_image, secrets=[Secret.from_name("my-anthropic-secret")])
+app = App(name="query-svc", image=app_image, secrets=[Secret.from_name("my-anthropic-secret")])
 
 class UserProfile(BaseModel):
     preferred_name: str = "Default Name"
@@ -48,7 +48,7 @@ class QueryRequest(BaseModel):
     Mount.from_local_dir(
         local_path="/Users/erniesg/code/erniesg/shareshare/attn/api/endpoints",
         remote_path="/app/endpoints",
-        condition=lambda pth: "query_v2.py" not in pth,
+        condition=lambda pth: "query.py" not in pth,
         recursive=True
     )
 ])

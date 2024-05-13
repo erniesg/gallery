@@ -9,16 +9,17 @@ class LLMHandler:
     def __init__(self, api_key=None):
         self.client = anthropic.Anthropic(api_key=api_key or os.getenv("ANTHROPIC_API_KEY"))
 
-    def call_llm(self, function_name, request):
+    def call_llm(self, function_name, request, model_name=None):
         system_prompt, message_prompt = get_prompts(function_name, request)
         # Log the prompts being sent to the LLM
         logger.info(f"System Prompt: {system_prompt}")
         logger.info(f"Message Prompt: {message_prompt}")
+        model_to_use = model_name if model_name else request.models[0]
 
         try:
             # Always use the streaming API
             with self.client.messages.stream(
-                model=request.models[0],
+                model=model_to_use,
                 max_tokens=100,
                 messages=[{"role": "user", "content": message_prompt}],
                 system=system_prompt if system_prompt else None  # Pass system prompt if available
