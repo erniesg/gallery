@@ -10,20 +10,21 @@ from modal import Image, App, web_endpoint, Secret, Mount
 from fastapi.responses import StreamingResponse
 import logging
 import json
+import backoff
 
 logger = logging.getLogger()
-logger.setLevel(logging.WARNING)
-handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-logger.addHandler(handler)
-logger.propagate = True
+logger.setLevel(logging.INFO)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("hpack").setLevel(logging.WARNING)
 
 app_image = (
     Image.debian_slim(python_version="3.10")
     .pip_install(
         "requests",
         "anthropic",
-        "bs4"
+        "bs4",
+        "lxml",
+        "backoff"
     )
 )
 
@@ -67,8 +68,10 @@ async def read(request: ReadRequest):
     return StreamingResponse(article_stream(), media_type="text/event-stream")
 
 async def fetch_and_parse_url(url: str) -> ArticleData:
-    logging.debug(f"Initiating parsing for URL: {url}")
+    logging.info(f"Initiating parsing for URL: {url}")
     raw_content = await fetch_content(url)
+    logging.info(f"Received raw content: {raw_content}")
+
     try:
         # Assuming the content is a JSON string embedded within the stream
         content_data = json.loads(raw_content.split("data: ")[1])
@@ -90,26 +93,31 @@ async def fetch_and_parse_url(url: str) -> ArticleData:
     )
 
 async def fetch_metadata(url: str) -> dict:
-    logging.debug(f"Fetching metadata for URL: {url}")
-    async with httpx.AsyncClient() as client:
+    logging.info(f"Fetching metadata for URL: {url}")
+    async with httpx.AsyncClient(follow_redirects=True) as client:
         try:
             response = await client.get(url)
-            soup = BeautifulSoup(response.text, 'html.parser')
+            soup = BeautifulSoup(response.text, 'lxml')
 
             # Extract title
-            title = soup.find('title').text if soup.find('title') else 'No title found'
-            og_title = soup.find('meta', attrs={'property': 'og:title', 'content': True})
-            title = og_title['content'] if og_title else title
+            title_tag = soup.find('title')
+            title = title_tag.text if title_tag else 'No title found'
+            logging.info(f"Extracted title: {title}")
 
             # Extract description
             meta_description = soup.find('meta', attrs={'name': 'description', 'content': True})
-            og_description = soup.find('meta', attrs={'property': 'og:description', 'content': True})
-            description = og_description['content'] if og_description else (meta_description['content'] if meta_description else 'No description found')
+            description = meta_description['content'].strip() if meta_description else 'No description found'
+            if description == 'No description found':
+                og_description = soup.find('meta', attrs={'property': 'og:description', 'content': True})
+                description = og_description['content'].strip() if og_description else description
+            logging.info(f"Extracted description: {description}")
 
             # Extract keywords
             meta_keywords = soup.find('meta', attrs={'name': 'keywords', 'content': True})
             keywords = meta_keywords['content'].split(',') if meta_keywords and meta_keywords['content'] else []
+            logging.info(f"Keywords: {keywords}")
 
+            # Return a structured dictionary that matches the ArticleData fields
             return {
                 'title': title,
                 'description': description,
@@ -117,23 +125,28 @@ async def fetch_metadata(url: str) -> dict:
             }
         except Exception as e:
             logging.error(f"Failed to fetch metadata for {url}: {str(e)}")
-            return {'title': '', 'description': '', 'keywords': []}
+            return {
+                'title': 'No title found',
+                'description': 'No description found',
+                'keywords': []
+            }
 
+@backoff.on_exception(backoff.expo, httpx.HTTPError, max_tries=3)
 async def fetch_content(url: str) -> str:
-    logging.debug(f"Initiating content fetch for URL: {url}")
+    logging.info(f"Initiating content fetch for URL: {url}")
     full_url = f"https://r.jina.ai/{url}"  # Construct the full URL
     async with httpx.AsyncClient(timeout=60.0) as client:
         try:
-            logging.debug(f"Sending HTTP GET request to stream: {full_url}")
+            logging.info(f"Sending HTTP GET request to stream: {full_url}")
             async with client.stream("GET", full_url, headers={"Accept": "text/event-stream"}) as response:
-                logging.debug(f"HTTP stream opened for URL: {full_url}")
+                logging.info(f"HTTP stream opened for URL: {full_url}")
                 content = ""
                 line_count = 0
                 async for line in response.aiter_lines():
                     line_count += 1
                     content += line + "\n"
                     if line_count % 250 == 0:  # Log every 250 lines
-                        logging.debug(f"Received {line_count} lines so far from URL: {url}")
+                        logging.info(f"Received {line_count} lines so far from URL: {url}")
                 logging.info(f"Completed fetching content from URL: {full_url}. Total lines received: {line_count}")
                 return content
         except Exception as e:
