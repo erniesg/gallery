@@ -1,10 +1,9 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from pydantic import BaseModel, validator
 from typing import List, Optional
 import modal
 from modal import Image, App, web_endpoint, Secret, Mount
 import os
-from fastapi.responses import StreamingResponse
 import json
 import logging
 
@@ -55,7 +54,6 @@ class QueryRequest(BaseModel):
 @web_endpoint(method="POST")
 async def query_v2(request: QueryRequest):
     import sys
-    import os
     import json
     from fastapi.responses import StreamingResponse
     from fastapi import HTTPException
@@ -100,31 +98,24 @@ async def query_v2(request: QueryRequest):
         logger.error(f"Error occurred: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
-    # from app.llm_handler import LLMHandler
-    # from app.prompts import get_prompts
-    # try:
-    #     llm_handler = LLMHandler()
-    #     system_prompt, message_prompt = get_prompts("generate_urls", request)
-    #     response_text = llm_handler.call_llm("generate_urls", request)
-    #     urls = parse_urls_from_response(response_text, request.num_urls)
-
-    #     async def stream_urls():
-    #         yield f"Query received: {request.query}\n"
-    #         yield f"User profile: {json.dumps(request.user_profile.dict())}\n"
-    #         for url in urls:
-    #             yield f"{url}\n"
-
-    #     return StreamingResponse(stream_urls(), media_type="text/plain")
-    # except Exception as e:
-    #     logger.error(f"Error occurred: {str(e)}")
-    #     raise HTTPException(status_code=500, detail="Internal Server Error")
-
 def parse_urls_from_response(text: str, num_urls: int) -> List[str]:
-    import json
     try:
         data = json.loads(text)
         urls = [item['url'] for item in data['urls'][:num_urls]]
+        logger.info(f"URLs parsed from response: {urls}")
         return urls
-    except json.JSONDecodeError:
-        logger.error("Failed to decode JSON from LLM response")
-        return []
+    except (json.JSONDecodeError, KeyError) as e:
+        logger.error(f"Error parsing URLs from response: {str(e)}")
+        # Try to extract URLs using a fallback approach
+        urls = extract_urls_fallback(text, num_urls)
+        logger.info(f"URLs parsed using fallback approach: {urls}")
+        return urls
+
+def extract_urls_fallback(text: str, num_urls: int) -> List[str]:
+    # Implement a fallback approach to extract URLs from the text
+    # This could involve using regular expressions or other string manipulation techniques
+    # to extract the URLs even if the JSON is not properly formatted
+    # Example implementation:
+    import re
+    urls = re.findall(r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+', text)
+    return urls[:num_urls]
