@@ -2,13 +2,11 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, validator
 from typing import List, Optional
 import modal
-from modal import Image, App, web_endpoint, Secret
-from fastapi.responses import StreamingResponse
-import requests
+from modal import Image, App, web_endpoint, Secret, Mount
 import os
-import logging
-import anthropic
+from fastapi.responses import StreamingResponse
 import json
+import logging
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -37,9 +35,8 @@ class UserProfile(BaseModel):
 class QueryRequest(BaseModel):
     query: str
     user_profile: Optional[UserProfile] = None
-    models: List[str] = ["claude-3-opus-20240229"]  # Default to Claude Opus model
+    models: List[str] = ["claude-3-opus-20240229"]
     num_urls: int = 20
-    custom_prompt: Optional[str] = None
 
     @validator('query')
     def ensure_string(cls, value):
@@ -47,99 +44,61 @@ class QueryRequest(BaseModel):
             raise ValueError('Query must be a string')
         return value
 
-@app.function()
+@app.function(mounts=[
+    Mount.from_local_dir(
+        local_path="/Users/erniesg/code/erniesg/shareshare/attn/api/endpoints",
+        remote_path="/app/endpoints",
+        condition=lambda pth: "query_v2.py" not in pth,
+        recursive=True
+    )
+])
 @web_endpoint(method="POST")
 async def query(request: QueryRequest):
+    import sys
+    import os
+    import json
+    from fastapi.responses import StreamingResponse
+    from fastapi import HTTPException
+    import logging
+
+    # Configure logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+
+    # List files in the current directory and /app directory
+    logger.info(f"Files in the current directory: {os.listdir('.')}")
+    logger.info(f"Files at root directory: {os.listdir('/')}")
+    logger.info(f"Files in the /app directory: {os.listdir('/app')}")
+    logger.info(f"Files in the /app/endpoints directory: {os.listdir('/app/endpoints')}")
+    logger.info(f"Current working directory: {os.getcwd()}")
+
+    sys.path.insert(0, '/app/endpoints')
+    sys.path.insert(0, '/app')
+    logger.info(f"Current sys.path: {sys.path}")
+
+    # Importing modules from endpoints
     try:
-        query_text = request.query
-        user_profile = request.user_profile or UserProfile()
-        urls_response = generate_urls.remote(request)
+        from llm_handler import LLMHandler
+        from prompts import get_prompts
+    except ImportError as e:
+        logger.error(f"Failed to import modules from endpoints: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to import required modules")
+
+    try:
+        llm_handler = LLMHandler()
+        system_prompt, message_prompt = get_prompts("generate_urls", request)
+        response_text = llm_handler.call_llm("generate_urls", request)
+        urls = parse_urls_from_response(response_text, request.num_urls)
 
         async def stream_urls():
-            yield f"Query received: {query_text}\n"
-            yield f"User profile: {json.dumps(user_profile.dict())}\n"
-            for url in urls_response['urls']:
+            yield f"Query received: {request.query}\n"
+            yield f"User profile: {json.dumps(request.user_profile.dict())}\n"
+            for url in urls:
                 yield f"{url}\n"
-
         return StreamingResponse(stream_urls(), media_type="text/plain")
     except Exception as e:
         logger.error(f"Error occurred: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
-
-@app.function()
-async def generate_urls(request: QueryRequest):
-    logger.info(f"Incoming request: {request}")
-
-    prompt = request.custom_prompt or construct_prompt(request)
-
-    logger.info(f"Constructed prompt: {prompt}")
-
-    urls = []
-    for model in request.models:
-        try:
-            response_text = call_llm_api.remote(prompt, model)
-            urls.extend(parse_urls_from_response(response_text, request.num_urls))
-        except Exception as e:
-            logger.error(f"Error calling LLM API with model {model}: {str(e)}")
-            continue
-
-    return {"urls": urls}
-
-def construct_prompt(request: QueryRequest) -> str:
-    prompt = f"""
-Please provide a response in the following structured JSON format:
-
-{{
-  "urls": [
-    {{
-      "url": "https://masterdomain.com"
-    }},
-    ...
-  ]
-}}
-
-The "urls" array should contain objects with a single "url" property, representing the master domain URL only. Do not include any other properties like title or source.
-
-Return a list of {request.num_urls} news and publications URLs relevant to the query '{request.query}' for a user with the following profile:
-- Preferred Name: {request.user_profile.preferred_name if request.user_profile else 'Default Name'}
-- Country of Residence: {request.user_profile.country_of_residence if request.user_profile else 'Default Country'}
-- Age: {request.user_profile.age if request.user_profile else 30}
-- Job Title: {request.user_profile.job_title if request.user_profile else 'Default Job Title'}
-- Job Function: {request.user_profile.job_function if request.user_profile else 'Default Job Function'}
-- Interests: {request.user_profile.interests if request.user_profile else ['technology', 'science']}
-- Goals: {request.user_profile.goals if request.user_profile else 'learn and explore'}
-
-The URLs should be relevant for a personalized news digest based on the user's profile and query.
-
-Always respond with a structured, valid JSON, adhering strictly to the provided example format. Do not include any other text or explanations outside of the JSON structure.
-"""
-    logger.info(f"Constructed prompt: {prompt}")
-    return prompt
-
-@app.function(secrets=[modal.Secret.from_name("my-anthropic-secret")])
-async def call_llm_api(prompt: str, model: str):
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    client = anthropic.Anthropic(api_key=api_key)
-
-    try:
-        # Use the streaming API
-        with client.messages.stream(
-            model=model,
-            max_tokens=100,
-            messages=[{"role": "user", "content": prompt}]
-        ) as stream:
-            content = []
-            for text in stream.text_stream:
-                content.append(text)
-                logger.info(f"Streaming text: {text}")
-
-        full_content = ''.join(content)
-        logger.info(f"LLM API request completed with completed response: {full_content}")
-        logger.info(f"Type of response from LLM: {type(full_content)}")  # Log the type of the response
-        return full_content
-    except Exception as e:
-        logger.error(f"LLM API call failed: {str(e)}")
-        raise HTTPException(status_code=500, detail="LLM API call failed")
 
 def parse_urls_from_response(text: str, num_urls: int) -> List[str]:
     try:

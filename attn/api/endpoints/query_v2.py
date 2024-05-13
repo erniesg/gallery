@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, APIRouter
 from pydantic import BaseModel, validator
 from typing import List, Optional
 import modal
@@ -12,15 +12,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Define the Docker image with necessary dependencies
-app_image = (
-    Image.debian_slim(python_version="3.10")
-    .pip_install(
-        "requests",
-        "anthropic"
-    )
-)
+# app_image = (
+#     Image.debian_slim(python_version="3.10")
+#     .pip_install(
+#         "requests",
+#         "anthropic"
+#     )
+# )
 
-app = App(name="query-app", image=app_image, secrets=[Secret.from_name("my-anthropic-secret")])
+# app = App(name="query-app", image=app_image, secrets=[Secret.from_name("my-anthropic-secret")])
 
 class UserProfile(BaseModel):
     preferred_name: str = "Default Name"
@@ -43,14 +43,19 @@ class QueryRequest(BaseModel):
             raise ValueError('Query must be a string')
         return value
 
-@app.function(mounts=[
-    Mount.from_local_dir(
-        local_path="/Users/erniesg/code/erniesg/shareshare/attn/api/endpoints",
-        remote_path="/app/endpoints",
-        condition=lambda pth: "query_v2.py" not in pth,
-        recursive=True
-    )
-])
+# @app.function(mounts=[
+#     Mount.from_local_dir(
+#         local_path="/Users/erniesg/code/erniesg/shareshare/attn/api/endpoints",
+#         remote_path="/app/endpoints",
+#         condition=lambda pth: "app.py" not in pth,
+#         recursive=True
+#     )
+# ])
+
+router = APIRouter()
+app = App(name="query-app")
+# @router.post("/query_v2")
+@app.function()
 @web_endpoint(method="POST")
 async def query_v2(request: QueryRequest):
     import sys
@@ -64,15 +69,15 @@ async def query_v2(request: QueryRequest):
     logger = logging.getLogger(__name__)
 
     # List files in the current directory and /app directory
-    logger.info(f"Files in the current directory: {os.listdir('.')}")
-    logger.info(f"Files at root directory: {os.listdir('/')}")
-    logger.info(f"Files in the /app directory: {os.listdir('/app')}")
-    logger.info(f"Files in the /app/endpoints directory: {os.listdir('/app/endpoints')}")
-    logger.info(f"Current working directory: {os.getcwd()}")
+    # logger.info(f"Files in the current directory: {os.listdir('.')}")
+    # logger.info(f"Files at root directory: {os.listdir('/')}")
+    # logger.info(f"Files in the /app directory: {os.listdir('/app')}")
+    # logger.info(f"Files in the /app/endpoints directory: {os.listdir('/app/endpoints')}")
+    # logger.info(f"Current working directory: {os.getcwd()}")
 
-    sys.path.insert(0, '/app/endpoints')
-    sys.path.insert(0, '/app')
-    logger.info(f"Current sys.path: {sys.path}")
+    # sys.path.insert(0, '/app/endpoints')
+    # sys.path.insert(0, '/app')
+    # logger.info(f"Current sys.path: {sys.path}")
 
     # Importing modules from endpoints
     try:

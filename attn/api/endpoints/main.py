@@ -4,6 +4,16 @@ from pydantic import BaseModel
 from typing import Optional, List
 import asyncio
 
+app_image = (
+    Image.debian_slim(python_version="3.10")
+    .pip_install(
+        "requests",
+        "anthropic"
+    )
+)
+
+app = App(name="query-app", image=app_image, secrets=[Secret.from_name("my-anthropic-secret")])
+
 app = FastAPI()
 
 class QueryInput(BaseModel):
