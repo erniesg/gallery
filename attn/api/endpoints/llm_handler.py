@@ -1,3 +1,5 @@
+import sys
+sys.path.append('/Users/erniesg/code/erniesg/shareshare/attn/api/')
 from endpoints.prompts import get_prompts
 import anthropic
 import os
@@ -9,8 +11,10 @@ class LLMHandler:
     def __init__(self, api_key=None):
         self.client = anthropic.Anthropic(api_key=api_key or os.getenv("ANTHROPIC_API_KEY"))
 
-    def call_llm(self, function_name, request, model_name=None):
-        system_prompt, message_prompt = get_prompts(function_name, request)
+    def call_llm(self, function_name, request, model_name=None, **kwargs):
+        logger.info(f"LLM Handler - Received kwargs in call_llm: {kwargs}")  # Log the contents of kwargs
+
+        system_prompt, message_prompt = get_prompts(function_name, request, **kwargs)
         # Log the prompts being sent to the LLM
         logger.info(f"System Prompt: {system_prompt}")
         logger.info(f"Message Prompt: {message_prompt}")
@@ -20,7 +24,7 @@ class LLMHandler:
             # Always use the streaming API
             with self.client.messages.stream(
                 model=model_to_use,
-                max_tokens=100,
+                max_tokens=1000,
                 messages=[{"role": "user", "content": message_prompt}],
                 system=system_prompt if system_prompt else None  # Pass system prompt if available
             ) as stream:

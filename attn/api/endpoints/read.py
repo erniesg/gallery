@@ -113,9 +113,13 @@ async def fetch_and_parse_url(url: str) -> ArticleData:
 
 async def fetch_metadata(url: str) -> dict:
     logging.info(f"Fetching metadata for URL: {url}")
-    async with httpx.AsyncClient(follow_redirects=True) as client:
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36",
+        "Referer": "https://www.google.com/"
+    }
+    async with httpx.AsyncClient(follow_redirects=True, headers=headers) as client:
         try:
-            response = await client.get(url)
+            response = await client.get(url, headers=headers)
             soup = BeautifulSoup(response.text, 'lxml')
 
             # Extract title
