@@ -140,6 +140,9 @@ def extract_urls_fallback(text: str) -> List[str]:
     return urls
 
 async def extract_structure(request: ExtractRequest, model_name: str = "claude-3-haiku-20240307"):
+    from llm_handler import LLMHandler
+    from prompts import get_prompts
+    llm_handler = LLMHandler()
 
     if not request.articles:
         raise HTTPException(status_code=400, detail="No articles provided")
@@ -152,7 +155,11 @@ async def extract_structure(request: ExtractRequest, model_name: str = "claude-3
         try:
             system_prompt, message_prompt = get_prompts(
                 "extract_structure", request,
-                article_content=article.content
+                url=article.url,
+                title=article.title,
+                keywords=",".join(article.keywords),
+                description=article.description,
+                content=article.content
             )
         except KeyError:
             logger.error("Prompt configuration for 'extract_structure' not found.")
@@ -165,7 +172,11 @@ async def extract_structure(request: ExtractRequest, model_name: str = "claude-3
                 "extract_structure",
                 request,
                 model_name=model_name,
-                article_content=article.content
+                url=article.url,
+                title=article.title,
+                keywords=",".join(article.keywords),
+                description=article.description,
+                content=article.content
             )
             data = parse_structure_from_response(response_text)
             structured_data.append(data)  # Add the extracted structured data to the main list
