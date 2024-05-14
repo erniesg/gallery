@@ -58,18 +58,17 @@ class ExtractRequest(BaseModel):
 ])
 @web_endpoint(method="POST")
 async def extract(request: ExtractRequest):
-    logger.info(f"Files in the current directory: {os.listdir('.')}")
-    logger.info(f"Files at root directory: {os.listdir('/')}")
-    logger.info(f"Files in the /app directory: {os.listdir('/app')}")
-    logger.info(f"Current working directory: {os.getcwd()}")
     sys.path.insert(0, '/app')
     sys.path.insert(0, '/app/endpoints')
     logger.info(f"Current sys.path: {sys.path}")
     logger.info(f"Files in the /app/endpoints directory: {os.listdir('/app/endpoints')}")
 
-    article_urls = await extract_article_urls(request)
-    # Placeholder for calling extract_structure
-    return {"article_urls": article_urls}
+    if request.query:  # If a query is present, extract article URLs
+        article_urls = await extract_article_urls(request)
+        return {"article_urls": article_urls}
+    else:  # Otherwise, extract structured data from articles
+        structured_data = await extract_structure(request)
+        return {"structured_data": structured_data}
 
 async def extract_article_urls(request: ExtractRequest, model_name: str = "claude-3-haiku-20240307"):
     from llm_handler import LLMHandler
@@ -119,10 +118,6 @@ async def extract_article_urls(request: ExtractRequest, model_name: str = "claud
 
     return all_urls  # Return the collected URLs from all articles
 
-def extract_structure():
-    # Placeholder for extract_structure implementation
-    pass
-
 def parse_urls_from_response(text: str) -> List[str]:
     try:
         data = json.loads(text)
@@ -139,3 +134,50 @@ def extract_urls_fallback(text: str) -> List[str]:
     urls = re.findall(r'https?://\S+', text)  # Adjust regex as needed
     logger.info(f"URLs parsed using fallback approach: {urls}")
     return urls
+
+async def extract_structure(request: ExtractRequest, model_name: str = "claude-3-haiku-20240307"):
+
+    if not request.articles:
+        raise HTTPException(status_code=400, detail="No articles provided")
+
+    structured_data = []  # List to collect structured data from all articles
+
+    # Iterate over each article in the request
+    for article in request.articles:
+        logger.info(f"Processing article {article.title} with URL: {article.url}")
+        try:
+            system_prompt, message_prompt = get_prompts(
+                "extract_structure", request,
+                article_content=article.content
+            )
+        except KeyError:
+            logger.error("Prompt configuration for 'extract_structure' not found.")
+            raise HTTPException(status_code=500, detail="Configuration error")
+
+        # Call the LLM and handle the response for each article
+        try:
+            logger.info(f"Extract - Preparing to call LLM for article with URL: {article.url}")
+            response_text = llm_handler.call_llm(
+                "extract_structure",
+                request,
+                model_name=model_name,
+                article_content=article.content
+            )
+            data = parse_structure_from_response(response_text)
+            structured_data.append(data)  # Add the extracted structured data to the main list
+        except Exception as e:
+            logger.error(f"LLM call failed for article {article.url}: {str(e)}")
+            # Optionally continue to the next article or raise an HTTPException
+            continue  # Continue processing next articles even if one fails
+
+    return structured_data  # Return the collected structured data from all articles
+
+def parse_structure_from_response(text: str) -> dict:
+    try:
+        data = json.loads(text)
+        logger.info(f"Structured data parsed from response: {data}")
+        return data
+    except (json.JSONDecodeError, KeyError) as e:
+        logger.error(f"Error parsing structured data from response: {str(e)}")
+        # Handle parsing error or return an empty dict
+        return {}

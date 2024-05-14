@@ -66,6 +66,51 @@ prompts = {
 
         The URLs should be relevant for a personalized news digest based on the user's profile and the topics of interest.
         """
+    },
+    "extract_structure": {
+        "system_prompt": "Always respond with a structured, valid JSON, adhering strictly to the provided example format. Do not include any other text or explanations outside of the JSON structure.",
+        "message_prompt": """
+        Extract the following structured information from the article content:
+
+        URL: {url}
+        Title: {title}
+        Keywords: {keywords}
+        Description: {description}
+        Content: {content}
+
+        Use the `extract_structure` tool to extract the following information:
+        - Author: Extract the author of the article.
+        - Published Date: Extract the published date of the article.
+        - Entities: Extract entities mentioned in the article, categorized by type and value.
+        - Location: Extract locations mentioned in the article using ISO3 codes.
+        - Main Idea: Extract the main idea of the article.
+        - Assertions: Extract assertions made in the article, categorized by type and value.
+        - Summary: Provide a brief summary of the article.
+
+        Provide the response in the following structured JSON format:
+
+        {{
+          "author": "",
+          "published_date": "",
+          "entities": [
+            {{
+              "type": "",
+              "value": ""
+            }},
+            ...
+          ],
+          "location": "",
+          "main_idea": "",
+          "assertions": [
+            {{
+              "type": "",
+              "value": ""
+            }},
+            ...
+          ],
+          "summary": ""
+        }}
+        """
     }
 }
 
