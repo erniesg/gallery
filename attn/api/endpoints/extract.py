@@ -88,7 +88,7 @@ async def extract_article_urls(request: ExtractRequest, model_name: str = "claud
                 "extract_article_urls", request,
                 url=article.url,
                 title=article.title,
-                keywords=','.join(article.keywords),
+                keywords=",".join(article.keywords),
                 description=article.description,
                 content=article.content
             )
@@ -105,7 +105,7 @@ async def extract_article_urls(request: ExtractRequest, model_name: str = "claud
                 model_name=model_name,
                 url=article.url,
                 title=article.title,
-                keywords=','.join(article.keywords),
+                keywords=",".join(article.keywords),
                 description=article.description,
                 content=article.content
             )
@@ -121,7 +121,7 @@ async def extract_article_urls(request: ExtractRequest, model_name: str = "claud
 def parse_urls_from_response(text: str) -> List[str]:
     try:
         data = json.loads(text)
-        urls = [item['url'] for item in data['urls']]
+        urls = [item["url"] for item in data["urls"]]
         logger.info(f"URLs parsed from response: {urls}")
         return urls
     except (json.JSONDecodeError, KeyError) as e:
@@ -130,9 +130,13 @@ def parse_urls_from_response(text: str) -> List[str]:
         return extract_urls_fallback(text)
 
 def extract_urls_fallback(text: str) -> List[str]:
-    # Fallback method to extract URLs using regular expressions
-    urls = re.findall(r'https?://\S+', text)  # Adjust regex as needed
+    # Regex to match URLs
+    url_pattern = re.compile(r'https?://[^\s"\'<>]+')
+    urls = url_pattern.findall(text)
+
+    # Log the extracted URLs
     logger.info(f"URLs parsed using fallback approach: {urls}")
+
     return urls
 
 async def extract_structure(request: ExtractRequest, model_name: str = "claude-3-haiku-20240307"):
