@@ -111,14 +111,37 @@ prompts = {
           "summary": ""
         }}
         """
+    },
+    "score_article": {
+        "system_prompt": "Always respond with a structured, valid JSON, adhering strictly to the provided example format. Do not include any other text or explanations outside of the JSON structure.",
+        "message_prompt": """
+        Use the `score_article` tool to score the following article content based on the provided topics:
+
+        URL: {url}
+        Title: {title}
+        Keywords: {keywords}
+        Description: {description}
+        Content: {content}
+
+        Topics to score:
+        {topics}
+
+        Provide the response in the following structured JSON format:
+
+        {{
+        "url": "{url}",
+        "scores": {{
+            {scores}
+        }}
+        }}
+        """
     }
 }
 
 def get_prompts(function_name, request, **kwargs):
-    logger.info(f"Get Prompts - Received kwargs in get_prompts: {kwargs}")  # Log the contents of kwargs
+    logger.info(f"Get Prompts - Received request {request} with kwargs: {kwargs}")  # Log the contents of kwargs
 
     system_prompt = prompts[function_name].get("system_prompt", "")
-    logger.info(f"Formatting message_prompt with: num_urls={request.num_urls}, query={request.query}, preferred_name={request.user_profile.preferred_name}, country_of_residence={request.user_profile.country_of_residence}, age={request.user_profile.age}, job_title={request.user_profile.job_title}, job_function={request.user_profile.job_function}, interests={request.user_profile.interests}, goals={request.user_profile.goals}")
     message_prompt = prompts[function_name]["message_prompt"].format(
         num_urls=request.num_urls,
         query=request.query,

@@ -37,5 +37,25 @@ tools = [
             },
             "required": ["author", "published_date", "entities", "location", "main_idea", "assertions", "summary"]
         }
+    },
+    {
+        "name": "score_article",
+        "description": "Scores the article content based on predefined topics.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "URL of the article"},
+                "title": {"type": "string", "description": "Title of the article"},
+                "keywords": {"type": "array", "items": {"type": "string"}, "description": "Keywords associated with the article"},
+                "description": {"type": "string", "description": "Description of the article"},
+                "content": {"type": "string", "description": "Content of the article"},
+                "topics": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of topics to score the article on"
+                }
+            },
+            "required": ["url", "title", "keywords", "description", "content", "topics"]
+        }
     }
 ]
