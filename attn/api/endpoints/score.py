@@ -79,6 +79,7 @@ async def score_articles(request: ScoreRequest, model_name: str = "claude-3-haik
 
     schema = load_schema('/app/endpoints/schema.json')
     topics = schema.get("topics", [])
+    logger.info(f"score.py - Topics loaded: {topics}")
 
     all_scores = []  # List to collect scores from all articles
 
@@ -95,13 +96,15 @@ async def score_articles(request: ScoreRequest, model_name: str = "claude-3-haik
                 content=article.content,
                 topics=topics
             )
+            logger.debug(f"System prompt: {system_prompt}")
+            logger.debug(f"Message prompt: {message_prompt}")
         except KeyError:
             logger.error("Prompt configuration for 'score_article' not found.")
             raise HTTPException(status_code=500, detail="Configuration error")
 
-    # Call the LLM and handle the response for each article
+        # Call the LLM and handle the response for each article
         try:
-            logger.info(f"Score - Preparing to call LLM for article with URL: {article.url}")
+            logger.info(f"score.py - Preparing to call LLM for article with URL: {article.url}")
             response_text = llm_handler.call_llm(
                 "score_article",
                 request,
@@ -110,7 +113,8 @@ async def score_articles(request: ScoreRequest, model_name: str = "claude-3-haik
                 title=article.title,
                 keywords=",".join(article.keywords),
                 description=article.description,
-                content=article.content
+                content=article.content,
+                topics=topics  # Add topics here
             )
             score_data = parse_scores_from_response(response_text)
             all_scores.append(ScoreResponse(url=article.url, scores=score_data))

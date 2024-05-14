@@ -131,7 +131,6 @@ prompts = {
         {{
         "url": "{url}",
         "scores": {{
-            {scores}
         }}
         }}
         """
@@ -142,16 +141,36 @@ def get_prompts(function_name, request, **kwargs):
     logger.info(f"Get Prompts - Received request {request} with kwargs: {kwargs}")  # Log the contents of kwargs
 
     system_prompt = prompts[function_name].get("system_prompt", "")
-    message_prompt = prompts[function_name]["message_prompt"].format(
-        num_urls=request.num_urls,
-        query=request.query,
-        preferred_name=request.user_profile.preferred_name,
-        country_of_residence=request.user_profile.country_of_residence,
-        age=request.user_profile.age,
-        job_title=request.user_profile.job_title,
-        job_function=request.user_profile.job_function,
-        interests=request.user_profile.interests,
-        goals=request.user_profile.goals,
-        **kwargs  # This will unpack any additional keyword arguments into the format string
-    )
+
+    # List of possible attributes to check
+    possible_attributes = [
+        "num_urls", "query", "preferred_name", "country_of_residence", "age",
+        "job_title", "job_function", "interests", "goals", "topics"
+    ]
+
+    # Prepare a dictionary with all possible parameters
+    params = {}
+    for attr in possible_attributes:
+        if hasattr(request, attr):
+            params[attr] = getattr(request, attr)
+        elif hasattr(request, "user_profile") and hasattr(request.user_profile, attr):
+            params[attr] = getattr(request.user_profile, attr)
+
+    # Include additional keyword arguments
+    params.update(kwargs)
+
+    # Filter out None values
+    params = {k: v for k, v in params.items() if v is not None}
+
+    logger.debug(f"Formatted parameters for prompt: {params}")
+
+    try:
+        message_prompt = prompts[function_name]["message_prompt"].format(**params)
+    except KeyError as e:
+        logger.error(f"Missing key in parameters for formatting: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Error formatting message prompt: {e}")
+        raise
+
     return system_prompt, message_prompt
