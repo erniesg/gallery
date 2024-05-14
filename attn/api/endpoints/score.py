@@ -129,7 +129,7 @@ def parse_scores_from_response(text: str) -> Dict[str, int]:
     try:
         data = json.loads(text)
         logger.info(f"Scores parsed from response: {data}")
-        return data
+        return data['scores']  # Return only the scores dictionary
     except (json.JSONDecodeError, KeyError) as e:
         logger.error(f"Error parsing scores from response: {str(e)}")
         return {}

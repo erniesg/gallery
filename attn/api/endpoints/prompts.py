@@ -115,7 +115,7 @@ prompts = {
     "score_article": {
         "system_prompt": "Always respond with a structured, valid JSON, adhering strictly to the provided example format. Do not include any other text or explanations outside of the JSON structure.",
         "message_prompt": """
-        Use the `score_article` tool to score the following article content based on the provided topics:
+        Use the `score_article` tool to score the following article content based on the provided topics on a scale of 0-1:
 
         URL: {url}
         Title: {title}
